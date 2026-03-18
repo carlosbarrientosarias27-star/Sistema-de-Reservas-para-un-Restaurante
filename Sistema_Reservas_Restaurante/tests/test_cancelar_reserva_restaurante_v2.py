@@ -1,46 +1,79 @@
 import pytest
 from datetime import datetime
-from src.restaurante import Restaurante, Reserva
+from src.restaurante import Restaurante
 
 @pytest.fixture
-def restaurante_con_reserva():
-    """Prepara un restaurante con una mesa y una reserva ya realizada."""
+def restaurante_con_datos():
+    """Configuración inicial con mesas y una reserva activa."""
     r = Restaurante()
     r.agregar_mesa(1, 4, "Interior")
-    fecha = datetime(2026, 5, 20, 20, 0)
-    reserva = r.crear_reserva("Juan Perez", "600123456", "juan@example.com", [1], fecha)
+    r.agregar_mesa(2, 2, "Terraza")
+    
+    fecha = datetime(2026, 5, 20, 21, 0)
+    # Creamos una reserva inicial para las pruebas de cancelación
+    reserva = r.crear_reserva("Ana Lopez", "34600111222", "ana@mail.com", [1], fecha)
     return r, reserva, fecha
 
-def test_cancelar_reserva_existente(restaurante_con_reserva):
-    """
-    Verifica que una reserva existente se elimine correctamente
-    y que las mesas queden disponibles de nuevo.
-    """
-    restaurante, reserva, fecha = restaurante_con_reserva
-    
-    # 1. Aseguramos que la mesa está ocupada antes de cancelar
-    assert 1 in restaurante.ocupacion_por_fecha[fecha]
-    assert len(restaurante.reservas) == 1
-    
-    # 2. Ejecutamos la cancelación
-    restaurante.cancelar_reserva(reserva)
-    
-    # 3. Validaciones finales
-    assert len(restaurante.reservas) == 0
-    # Verificamos que la mesa ya no figura como ocupada en esa fecha
-    assert 1 not in restaurante.ocupacion_por_fecha[fecha]
+# --- TESTS PARA cancelar_reserva() ---
 
-def test_cancelar_reserva_inexistente():
+def test_cancelar_reserva_existente(restaurante_con_datos):
     """
-    Verifica que el sistema lanza un ValueError si se intenta 
-    cancelar una reserva que no está registrada en el sistema.
+    Caso Normal: Verifica que al cancelar una reserva existente:
+    1. Se elimine de la lista de reservas.
+    2. Las mesas queden libres para esa fecha/hora.
     """
-    r = Restaurante()
-    fecha = datetime(2026, 5, 20, 20, 0)
-    # Creamos un objeto reserva manual que NUNCA se agregó al restaurante
-    reserva_falsa = Reserva("Intruso", "600000000", "fake@mail.com", [1], fecha)
+    r, reserva, fecha = restaurante_con_datos
     
-    with pytest.raises(ValueError) as excinfo:
-        r.cancelar_reserva(reserva_falsa)
+    # Acción
+    r.cancelar_reserva(reserva)
     
-    assert "La reserva no existe" in str(excinfo.value)
+    # Verificaciones
+    assert reserva not in r.reservas
+    assert len(r.reservas) == 0
+    # Verificar limpieza crítica de ocupación
+    assert 1 not in r.ocupacion_por_fecha[fecha]
+
+def test_cancelar_reserva_inexistente(restaurante_con_datos):
+    """
+    Caso de Error: Intentar cancelar una reserva que no está en el sistema
+    o que ya fue cancelada previamente.
+    """
+    r, reserva, _ = restaurante_con_datos
+    r.cancelar_reserva(reserva) # Cancelación exitosa
+    
+    # Intentar cancelar la misma reserva por segunda vez
+    with pytest.raises(ValueError, match="La reserva no existe"):
+        r.cancelar_reserva(reserva)
+
+# --- CASOS LÍMITE Y ESCENARIOS COMPLEJOS ---
+
+def test_cancelar_reserva_libera_solo_sus_mesas(restaurante_con_datos):
+    """
+    Caso Límite: En una fecha con múltiples reservas, cancelar una 
+    NO debe liberar las mesas de las otras.
+    """
+    r, reserva1, fecha = restaurante_con_datos
+    # Crear una segunda reserva en la misma fecha pero distinta mesa
+    reserva2 = r.crear_reserva("Luis", "34600000001", "luis@mail.com", [2], fecha)
+    
+    # Cancelar solo la reserva 1
+    r.cancelar_reserva(reserva1)
+    
+    # La mesa 1 debe estar libre, pero la mesa 2 debe seguir ocupada
+    assert 1 not in r.ocupacion_por_fecha[fecha]
+    assert 2 in r.ocupacion_por_fecha[fecha]
+    assert reserva2 in r.reservas
+
+def test_cancelar_reserva_fecha_inexistente_en_mapa(restaurante_con_datos):
+    """
+    Caso Límite/Robustez: Verifica que el sistema no falle si intentamos
+    cancelar una reserva cuya fecha ya no existe en el mapa de ocupación.
+    """
+    r, reserva, fecha = restaurante_con_datos
+    
+    # Simulamos una corrupción manual del mapa de ocupación o limpieza previa
+    del r.ocupacion_por_fecha[fecha]
+    
+    # El método debe manejarlo sin lanzar error gracias al 'if' de seguridad
+    r.cancelar_reserva(reserva)
+    assert reserva not in r.reservas
