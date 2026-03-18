@@ -27,6 +27,8 @@ class Restaurante:
     def __init__(self):
         self.mesas: Dict[int, Mesa] = {}
         self.reservas: List[Reserva] = []
+        # Nueva estructura: { datetime: set([id_mesa1, id_mesa2]) }
+        self.ocupacion_por_fecha: Dict[datetime, set] = {}
 
     # 1. Gestión de mesas (Evita duplicados)
     def agregar_mesa(self, numero: int, capacidad: int, zona: str):
@@ -37,24 +39,27 @@ class Restaurante:
     # 2. Crear reserva (Valida existencia de mesas y conflictos de horario)
     def crear_reserva(self, nombre: str, telefono: str, email: str,
                       mesas: List[int], fecha_hora: datetime):
-
-        # Validar que las mesas existan en el restaurante
+        
+        # 1. Validar existencia de mesas (O(M))
         for m in mesas:
             if m not in self.mesas:
-                raise ValueError(f"Error: La mesa {m} no existe.")
+                raise ValueError(f"Mesa {m} no existe.")
 
-        # Validar conflictos: que las mesas no estén ocupadas a esa misma hora
-        for reserva in self.reservas:
-            if reserva.fecha_hora == fecha_hora:
-                for m in mesas:
-                    if m in reserva.mesas:
-                        raise ValueError(
-                            f"Error: La mesa {m} ya está ocupada "
-                            f"el {fecha_hora.strftime('%Y-%m-%d %H:%M')}."
-                        )
+        # 2. Validar disponibilidad (O(M) en lugar de O(R * M))
+        # Acceso directo al set de esa fecha específica
+        ocupadas = self.ocupacion_por_fecha.get(fecha_hora, set())
+        for m in mesas:
+            if m in ocupadas:
+                raise ValueError(f"Mesa {m} ocupada en este horario.")
 
+        # 3. Registrar reserva y actualizar ocupación
         nueva_reserva = Reserva(nombre, telefono, email, mesas, fecha_hora)
         self.reservas.append(nueva_reserva)
+        
+        if fecha_hora not in self.ocupacion_por_fecha:
+            self.ocupacion_por_fecha[fecha_hora] = set()
+        self.ocupacion_por_fecha[fecha_hora].update(mesas)
+        
         return nueva_reserva
 
     def consultar_reservas(self, fecha: datetime = None):
