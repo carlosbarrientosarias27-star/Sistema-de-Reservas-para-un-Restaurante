@@ -12,24 +12,18 @@ def restaurante_base():
     r.agregar_mesa(4, 8, "VIP")
     return r
 
-# --- CASO LÍMITE: SIN DATOS ---
-
+# --- CASO LÍMITE: SIN DATOS (PASA) ---
 def test_estadisticas_sin_reservas(restaurante_base):
-    """
-    Verifica que el sistema maneje correctamente la ausencia de reservas
-    evitando errores de división por cero.
-    """
     stats = restaurante_base.calcular_estadisticas()
-    
     assert stats["total"] == 0
     assert stats["promedio_mesas"] == 0
 
-# --- CASOS NORMALES ---
+# --- CASOS NORMALES (CORREGIDOS) ---
 
 def test_estadisticas_una_reserva(restaurante_base):
     """Verifica el cálculo con una única reserva de una mesa."""
     restaurante_base.crear_reserva(
-        "Ana", "123456789", "ana@mail.com", [1], datetime.now()
+        "Ana Garcia", "34600111222", "ana@mail.com", [1], datetime.now()
     )
     stats = restaurante_base.calcular_estadisticas()
     
@@ -42,35 +36,28 @@ def test_estadisticas_multiples_reservas_y_mesas(restaurante_base):
     número de mesas asignadas.
     """
     fecha = datetime.now()
-    # Reserva 1: 2 mesas (IDs 1 y 2)
-    restaurante_base.crear_reserva("Juan", "111", "j@mail.com", [1, 2], fecha)
-    # Reserva 2: 1 mesa (ID 3)
-    restaurante_base.crear_reserva("Marta", "222", "m@mail.com", [3], fecha)
+    # Teléfonos corregidos a 9+ dígitos para pasar _validar_inputs
+    restaurante_base.crear_reserva("Juan Perez", "34600111000", "juan@mail.com", [1, 2], fecha)
+    restaurante_base.crear_reserva("Marta Ruiz", "34600222000", "marta@mail.com", [3], fecha)
     
     stats = restaurante_base.calcular_estadisticas()
     
-    # Total reservas: 2
-    # Total mesas: 3 (2 + 1)
-    # Promedio: 3 / 2 = 1.5
+    # Total mesas: 3 / Total reservas: 2 = 1.5
     assert stats["total"] == 2
     assert stats["promedio_mesas"] == 1.5
 
-# --- CASOS LÍMITE: POST-OPERACIONES ---
+# --- CASOS LÍMITE: POST-OPERACIONES (CORREGIDOS) ---
 
 def test_estadisticas_tras_cancelacion(restaurante_base):
-    """
-    Verifica que las estadísticas se actualicen correctamente 
-    al eliminar una reserva del sistema.
-    """
+    """Verifica que las estadísticas se actualicen al eliminar una reserva."""
     fecha = datetime.now()
-    reserva = restaurante_base.crear_reserva("Luis", "333", "l@mail.com", [4], fecha)
+    # Teléfono corregido
+    reserva = restaurante_base.crear_reserva("Luis Soler", "34600333000", "luis@mail.com", [4], fecha)
     
-    # Antes de cancelar: total 1
     assert restaurante_base.calcular_estadisticas()["total"] == 1
     
     restaurante_base.cancelar_reserva(reserva)
     
-    # Después de cancelar: vuelve a 0
     stats = restaurante_base.calcular_estadisticas()
     assert stats["total"] == 0
     assert stats["promedio_mesas"] == 0
