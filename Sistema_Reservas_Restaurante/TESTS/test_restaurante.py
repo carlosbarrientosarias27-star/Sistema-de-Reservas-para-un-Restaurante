@@ -2,10 +2,11 @@ import sys
 import os
 import pytest
 from datetime import datetime
+from  SRC.restaurante import Restaurante, Reserva
 
 # 1. Obtenemos la ruta absoluta de 'Sistema_Reservas_Restaurante'
 # Según tu error, está 2 niveles arriba de 'TEST 1'
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 src_path = os.path.join(base_path, "SRC")
 
 # 2. Añadimos AMBAS rutas al sistema para máxima compatibilidad
@@ -14,12 +15,7 @@ if base_path not in sys.path:
 if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
-# 3. Intentamos la importación
-try:
-    from SRC.restaurante import Restaurante, Reserva
-except ModuleNotFoundError:
-    from restaurante import Restaurante, Reserva
-    
+
 @pytest.fixture
 def restaurante_con_mesas():
     """Fixture que prepara un restaurante con mesas base para los tests."""
