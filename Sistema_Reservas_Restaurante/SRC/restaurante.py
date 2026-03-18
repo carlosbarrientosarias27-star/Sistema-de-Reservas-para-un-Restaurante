@@ -112,7 +112,30 @@ class Restaurante:
             self.crear_reserva(reserva.nombre, reserva.telefono, reserva.email, old_mesas, old_fecha)
             raise e
 
-# --- Ejemplo de ejecución ---
+# --- NUEVAS FUNCIONES AQUÍ ---
+
+    def buscar_disponibilidad(self, fecha_hora: datetime, capacidad_minima: int) -> List[int]:
+        """Devuelve una lista de IDs de mesas disponibles con capacidad suficiente."""
+        ocupadas = self.ocupacion_por_fecha.get(fecha_hora, set())
+        disponibles = [
+            m.numero for m in self.mesas.values() 
+            if m.numero not in ocupadas and m.capacidad >= capacidad_minima
+        ]
+        return disponibles
+
+    def calcular_estadisticas(self) -> Dict[str, any]:
+        """Calcula estadísticas básicas del sistema."""
+        total_reservas = len(self.reservas)
+        if total_reservas == 0:
+            return {"total": 0, "promedio_mesas": 0}
+        
+        total_mesas_reservadas = sum(len(r.mesas) for r in self.reservas)
+        return {
+            "total": total_reservas,
+            "promedio_mesas": total_mesas_reservadas / total_reservas
+        }
+
+# --- Ejemplo de ejecución (si lo mantienes) ---
 if __name__ == "__main__":
     restaurante = Restaurante()
     restaurante.agregar_mesa(1, 4, "interior")
