@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime
-from SRC.restaurante import Restaurante, Reserva
+from src.restaurante import Restaurante, Reserva
 
 @pytest.fixture
 def restaurante_configurado():

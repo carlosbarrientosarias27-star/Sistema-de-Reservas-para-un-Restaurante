@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime
-from SRC.restaurante import Restaurante, Reserva
+from src.restaurante import Restaurante, Reserva
 
 @pytest.fixture
 def restaurante_con_reserva():
@@ -43,4 +43,4 @@ def test_cancelar_reserva_inexistente():
     with pytest.raises(ValueError) as excinfo:
         r.cancelar_reserva(reserva_falsa)
     
-    assert "La reserva no existe" in str(excinfo.value)pytest Sistema_Reservas_Restaurante/TESTS/test_crear_reserva_v2.py
+    assert "La reserva no existe" in str(excinfo.value)
