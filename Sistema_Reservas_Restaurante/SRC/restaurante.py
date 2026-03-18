@@ -1,14 +1,15 @@
+import re
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 class Mesa:
     def __init__(self, numero: int, capacidad: int, zona: str):
         self.numero = numero
         self.capacidad = capacidad
-        self.zona = zona  # terraza / interior / privado
+        self.zona = zona
 
     def __repr__(self):
-        return f"Mesa({self.numero}, cap={self.capacidad}, zona={self.zona})"
+        return f"Mesa(ID={self.numero})"
 
 class Reserva:
     def __init__(self, nombre: str, telefono: str, email: str,
@@ -20,107 +21,96 @@ class Reserva:
         self.fecha_hora = fecha_hora
 
     def __repr__(self):
-        return (f"Reserva(cliente={self.nombre}, mesas={self.mesas}, "
-                f"fecha={self.fecha_hora.strftime('%Y-%m-%d %H:%M')})")
+        # No incluimos PII (email/teléfono) en el repr para evitar fugas en logs
+        return f"Reserva(Cliente={self.nombre[:3]}***, Mesas={self.mesas}, Fecha={self.fecha_hora})"
 
 class Restaurante:
     def __init__(self):
         self.mesas: Dict[int, Mesa] = {}
         self.reservas: List[Reserva] = []
-        # Nueva estructura: { datetime: set([id_mesa1, id_mesa2]) }
         self.ocupacion_por_fecha: Dict[datetime, set] = {}
 
-    # 1. Gestión de mesas (Evita duplicados)
+    def _validar_inputs(self, nombre: str, telefono: str, email: str):
+        """Validador centralizado de datos de usuario."""
+        if len(nombre) < 2 or len(nombre) > 50:
+            raise ValueError("Nombre inválido (2-50 caracteres).")
+        
+        # Regex simple para email y teléfono (evita inyecciones básicas)
+        if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
+            raise ValueError("Formato de email inválido.")
+            
+        if not re.match(r"^\+?1?\d{9,15}$", telefono):
+            raise ValueError("Formato de teléfono inválido.")
+
     def agregar_mesa(self, numero: int, capacidad: int, zona: str):
+        if not isinstance(numero, int) or numero <= 0:
+            raise ValueError("El número de mesa debe ser un entero positivo.")
         if numero in self.mesas:
-            raise ValueError(f"Error: La mesa {numero} ya existe.")
+            raise ValueError(f"La mesa {numero} ya existe.")
         self.mesas[numero] = Mesa(numero, capacidad, zona)
 
-    # 2. Crear reserva (Valida existencia de mesas y conflictos de horario)
     def crear_reserva(self, nombre: str, telefono: str, email: str,
-                      mesas: List[int], fecha_hora: datetime):
+                      mesas: List[int], fecha_hora: datetime) -> Reserva:
         
-        # 1. Validar existencia de mesas (O(M))
+        # 1. Validaciones de Seguridad
+        self._validar_inputs(nombre, telefono, email)
+        if not isinstance(mesas, list) or not mesas:
+            raise ValueError("Debe proporcionar una lista de mesas válida.")
+
+        # 2. Validar integridad de mesas y disponibilidad
         for m in mesas:
             if m not in self.mesas:
                 raise ValueError(f"Mesa {m} no existe.")
-
-        # 2. Validar disponibilidad (O(M) en lugar de O(R * M))
-        # Acceso directo al set de esa fecha específica
+        
         ocupadas = self.ocupacion_por_fecha.get(fecha_hora, set())
-        for m in mesas:
-            if m in ocupadas:
-                raise ValueError(f"Mesa {m} ocupada en este horario.")
+        if any(m in ocupadas for m in mesas):
+            raise ValueError("Una o más mesas están ocupadas en este horario.")
 
-        # 3. Registrar reserva y actualizar ocupación
+        # 3. Persistencia atómica
         nueva_reserva = Reserva(nombre, telefono, email, mesas, fecha_hora)
         self.reservas.append(nueva_reserva)
         
-        if fecha_hora not in self.ocupacion_por_fecha:
-            self.ocupacion_por_fecha[fecha_hora] = set()
-        self.ocupacion_por_fecha[fecha_hora].update(mesas)
-        
+        self.ocupacion_por_fecha.setdefault(fecha_hora, set()).update(mesas)
         return nueva_reserva
 
-    def consultar_reservas(self, fecha: datetime = None):
-        if fecha:
-            return [r for r in self.reservas if r.fecha_hora.date() == fecha.date()]
-        return self.reservas
-
-    def buscar_reserva(self, nombre: str):
-        return [r for r in self.reservas if r.nombre.lower() == nombre.lower()]
-
-    # 3. Modificar reserva (Usa el truco de quitar/poner para validar)
-    def modificar_reserva(self, reserva: Reserva, **kwargs):
-        if reserva not in self.reservas:
-            raise ValueError("Error: La reserva original no existe.")
-
-        # Guardamos una copia del estado original por si falla la validación
-        estado_anterior = {
-            "nombre": reserva.nombre,
-            "telefono": reserva.telefono,
-            "email": reserva.email,
-            "mesas": reserva.mesas,
-            "fecha_hora": reserva.fecha_hora
-        }
-
-        # Quitamos temporalmente para que no choque consigo misma al validar
-        self.reservas.remove(reserva)
-
-        try:
-            # Obtenemos nuevos valores o mantenemos los actuales
-            nombre = kwargs.get("nombre", reserva.nombre)
-            telefono = kwargs.get("telefono", reserva.telefono)
-            email = kwargs.get("email", reserva.email)
-            mesas = kwargs.get("mesas", reserva.mesas)
-            fecha_hora = kwargs.get("fecha_hora", reserva.fecha_hora)
-
-            # Validar disponibilidad intentando crear una reserva "fantasma"
-            # Si esto falla, saltará al 'except'
-            self.crear_reserva(nombre, telefono, email, mesas, fecha_hora)
-            
-            # Si tuvo éxito, la validación pasó, pero 'crear_reserva' añadió una extra.
-            # La quitamos y actualizamos el objeto original.
-            self.reservas.pop() 
-
-            reserva.nombre, reserva.telefono = nombre, telefono
-            reserva.email, reserva.mesas = email, mesas
-            reserva.fecha_hora = fecha_hora
-            
-            # Re-insertamos el objeto original actualizado
-            self.reservas.append(reserva)
-
-        except Exception as e:
-            # Si algo falla, restauramos la reserva original a la lista
-            self.reservas.append(reserva)
-            raise e
-
-    # 4. Cancelar reserva (Control de existencia)
     def cancelar_reserva(self, reserva: Reserva):
         if reserva in self.reservas:
+            # LIMPIEZA CRÍTICA: Liberar las mesas en el mapa de ocupación
+            if reserva.fecha_hora in self.ocupacion_por_fecha:
+                for m in reserva.mesas:
+                    self.ocupacion_por_fecha[reserva.fecha_hora].discard(m)
             self.reservas.remove(reserva)
         else:
-            raise ValueError("Error: No se pudo cancelar. La reserva no existe en el sistema.")
+            raise ValueError("La reserva no existe.")
+
+    def modificar_reserva(self, reserva: Reserva, **kwargs):
+        """Modificación segura con limpieza de estado previa."""
+        if reserva not in self.reservas:
+            raise ValueError("Reserva no encontrada.")
+
+        # 1. Extraer datos (nuevos o actuales)
+        n_nombre = kwargs.get("nombre", reserva.nombre)
+        n_tel = kwargs.get("telefono", reserva.telefono)
+        n_email = kwargs.get("email", reserva.email)
+        n_mesas = kwargs.get("mesas", reserva.mesas)
+        n_fecha = kwargs.get("fecha_hora", reserva.fecha_hora)
+
+        # 2. Backup y limpieza temporal del estado global
+        # Esto es vital para que la validación no choque con la propia reserva
+        old_fecha = reserva.fecha_hora
+        old_mesas = list(reserva.mesas)
+        self.cancelar_reserva(reserva)
+
+        try:
+            # 3. Intentar crear la nueva versión (valida todo de nuevo)
+            nueva = self.crear_reserva(n_nombre, n_tel, n_email, n_mesas, n_fecha)
+            # Reemplazar la referencia original si es necesario
+            reserva.nombre, reserva.telefono, reserva.email = n_nombre, n_tel, n_email
+            reserva.mesas, reserva.fecha_hora = n_mesas, n_fecha
+        except Exception as e:
+            # 4. Rollback: Si falla, restauramos la reserva original
+            self.crear_reserva(reserva.nombre, reserva.telefono, reserva.email, old_mesas, old_fecha)
+            raise e
 
 # --- Ejemplo de ejecución ---
 if __name__ == "__main__":
