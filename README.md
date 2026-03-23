@@ -86,7 +86,7 @@ El proyecto incluye tres versiones refactorizadas del núcleo, cada una con un f
 
 ## Requisitos previos
 
-- Python 3.8 o superior
+- Python 3.14
 - pip
 
 ## Pasos
