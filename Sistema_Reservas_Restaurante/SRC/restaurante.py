@@ -1,6 +1,5 @@
 from datetime import datetime
-import uuid
-
+import uuid 
 
 class Mesa:
     def __init__(self, numero, capacidad, zona):
@@ -31,6 +30,7 @@ class SistemaReservas:
     def __init__(self):
         self.mesas = []
         self.reservas = {}
+        self.ocupacion = set()
 
     # ---------------------------
     # Gestión de mesas
@@ -46,34 +46,36 @@ class SistemaReservas:
         return None
 
     # ---------------------------
-    # Disponibilidad
+    # Disponibilidad (Optimizado O(1))
     # ---------------------------
     def mesa_disponible(self, numero_mesa, fecha_hora):
-        for reserva in self.reservas.values():
-            if (reserva.mesa.numero == numero_mesa and
-                    reserva.fecha_hora == fecha_hora):
-                return False
-        return True
+        return (numero_mesa, fecha_hora) not in self.ocupacion
 
     # ---------------------------
-    # Crear reserva
+    # Crear reserva (Corregido y Limpio)
     # ---------------------------
     def crear_reserva(self, nombre, telefono, email, numero_mesa, fecha_hora_str, comensales):
+        # 1. Buscar la mesa
         mesa = self.obtener_mesa(numero_mesa)
-
         if not mesa:
-            return "❌ Error: Mesa no existe"
+            return "❌ Error: La mesa no existe"
 
-        if comensales > mesa.capacidad:
-            return "❌ Error: Capacidad de mesa insuficiente"
+        # 2. Convertir texto a objeto datetime
+        try:
+            fecha_hora = datetime.strptime(fecha_hora_str, "%Y-%m-%d %H:%M")
+        except ValueError:
+            return "❌ Error: Formato de fecha incorrecto. Use 'AAAA-MM-DD HH:MM'"
 
-        fecha_hora = datetime.strptime(fecha_hora_str, "%Y-%m-%d %H:%M")
-
+        # 3. Comprobar disponibilidad
         if not self.mesa_disponible(numero_mesa, fecha_hora):
-            return "❌ Error: Mesa ya ocupada en esa fecha y hora"
+            return "❌ Error: Mesa ya ocupada en ese horario"
 
+        # 4. Crear el objeto reserva y guardarlo
         reserva = Reserva(nombre, telefono, email, mesa, fecha_hora, comensales)
         self.reservas[reserva.id] = reserva
+        
+        # 5. Registrar ocupación
+        self.ocupacion.add((numero_mesa, fecha_hora)) 
 
         return f"✅ Reserva creada: {reserva}"
 
@@ -85,11 +87,10 @@ class SistemaReservas:
         return resultados if resultados else "⚠️ No hay reservas para ese cliente"
 
     # ---------------------------
-    # Modificar reserva
+    # Modificar reserva (Optimizado O(1))
     # ---------------------------
     def modificar_reserva(self, reserva_id, **kwargs):
         reserva = self.reservas.get(reserva_id)
-
         if not reserva:
             return "❌ Error: Reserva no encontrada"
 
@@ -99,15 +100,22 @@ class SistemaReservas:
         if isinstance(nueva_fecha, str):
             nueva_fecha = datetime.strptime(nueva_fecha, "%Y-%m-%d %H:%M")
 
-        if not self.mesa_disponible(nueva_mesa_num, nueva_fecha):
-            return "❌ Error: Nueva mesa ocupada en esa fecha y hora"
+        cambia_logistica = (nueva_mesa_num != reserva.mesa.numero or 
+                           nueva_fecha != reserva.fecha_hora)
+        
+        if cambia_logistica:
+            if not self.mesa_disponible(nueva_mesa_num, nueva_fecha):
+                return "❌ Error: Nueva mesa/horario ya ocupados"
 
+        # Actualizar índice de ocupación
+        self.ocupacion.discard((reserva.mesa.numero, reserva.fecha_hora))
+        
         nueva_mesa = self.obtener_mesa(nueva_mesa_num)
-
         if not nueva_mesa:
-            return "❌ Error: Nueva mesa no existe"
+            self.ocupacion.add((reserva.mesa.numero, reserva.fecha_hora))
+            return "❌ Error: La nueva mesa no existe"
 
-        # Aplicar cambios
+        # Actualizar campos
         reserva.nombre = kwargs.get("nombre", reserva.nombre)
         reserva.telefono = kwargs.get("telefono", reserva.telefono)
         reserva.email = kwargs.get("email", reserva.email)
@@ -115,6 +123,7 @@ class SistemaReservas:
         reserva.fecha_hora = nueva_fecha
         reserva.comensales = kwargs.get("comensales", reserva.comensales)
 
+        self.ocupacion.add((reserva.mesa.numero, reserva.fecha_hora))
         return f"✅ Reserva modificada: {reserva}"
 
     # ---------------------------
@@ -122,6 +131,8 @@ class SistemaReservas:
     # ---------------------------
     def cancelar_reserva(self, reserva_id):
         if reserva_id in self.reservas:
+            reserva = self.reservas[reserva_id]
+            self.ocupacion.discard((reserva.mesa.numero, reserva.fecha_hora))
             del self.reservas[reserva_id]
             return "✅ Reserva cancelada"
         return "❌ Error: Reserva no encontrada"
