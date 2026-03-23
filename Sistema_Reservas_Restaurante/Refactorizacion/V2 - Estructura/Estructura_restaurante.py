@@ -1,111 +1,149 @@
 import re
+import json
+import os
 from datetime import datetime
-from typing import List, Dict, Set
+from abc import ABC, abstractmethod
+from typing import List, Dict, Optional, Any, Tuple
 
-# --- 1. MODELOS DE DATOS (Entidades puras) ---
+# ──────────────────────────────────────────────────────────────────────────────
+# 1. ABSTRACCIONES (DIP - Inversión de Dependencias)
+# ──────────────────────────────────────────────────────────────────────────────
 
-class Mesa:
-    def __init__(self, numero: int, capacidad: int, zona: str):
-        self.numero = numero
-        self.capacidad = capacidad
-        self.zona = zona
+class GestorPersistencia(ABC):
+    """Abstracción para el almacenamiento de datos."""
+    @abstractmethod
+    def cargar(self) -> Tuple[List[Dict], int]: pass
+    
+    @abstractmethod
+    def guardar(self, datos: List[Dict], contador: int) -> None: pass
 
-    def __repr__(self):
-        return f"Mesa(ID={self.numero}, Zona={self.zona})"
+# ──────────────────────────────────────────────────────────────────────────────
+# 2. VALIDACIÓN (SRP - Responsabilidad Única)
+# ──────────────────────────────────────────────────────────────────────────────
 
-class Reserva:
-    def __init__(self, cliente: str, telefono: str, email: str,
-                 ids_mesas: List[int], fecha_hora: datetime):
-        self.cliente = cliente
-        self.telefono = telefono
-        self.email = email
-        self.ids_mesas = ids_mesas
-        self.fecha_hora = fecha_hora
+class ValidadorReserva:
+    """Se encarga exclusivamente de las reglas de formato y seguridad de datos."""
+    
+    FORMATO_FECHA = "%Y-%m-%d %H:%M"
 
-    def __repr__(self):
-        return f"Reserva(Cliente={self.cliente[:3]}***, Mesas={self.ids_mesas}, Fecha={self.fecha_hora})"
-
-
-# --- 2. SERVICIOS ESPECIALIZADOS (SRP) ---
-
-class ValidadorContacto:
-    """Única responsabilidad: Validar formatos de datos de clientes."""
     @staticmethod
-    def validar(nombre: str, telefono: str, email: str):
-        if not (2 <= len(nombre) <= 50):
-            raise ValueError("Nombre inválido (2-50 caracteres).")
-        if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
-            raise ValueError("Formato de email inválido.")
-        if not re.match(r"^\+?1?\d{9,15}$", telefono):
-            raise ValueError("Formato de teléfono inválido.")
+    def es_email_valido(email: str) -> bool:
+        patron = r"^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$"
+        return bool(re.match(patron, email.strip()))
 
-class InventarioMesas:
-    """Única responsabilidad: Gestionar el catálogo físico de mesas."""
-    def __init__(self):
-        self._mesas: Dict[int, Mesa] = {}
+    @staticmethod
+    def es_telefono_valido(telefono: str) -> bool:
+        patron = r"^\+?[\d\s\-]{9,15}$"
+        return bool(re.match(patron, telefono.strip()))
 
-    def agregar_mesa(self, mesa: Mesa):
-        if mesa.numero in self._mesas:
-            raise ValueError(f"La mesa {mesa.numero} ya existe.")
-        self._mesas[mesa.numero] = mesa
+    @staticmethod
+    def sanitizar(texto: str, max_len: int) -> str:
+        limpio = re.sub(r"[<>\"'%;()&+\\\x00-\x1f]", "", texto)
+        return limpio.strip()[:max_len]
 
-    def existe_mesa(self, numero: int) -> bool:
-        return numero in self._mesas
+    @classmethod
+    def validar_fecha_futura(cls, fecha_str: str) -> Optional[datetime]:
+        try:
+            fecha = datetime.strptime(fecha_str.strip(), cls.FORMATO_FECHA)
+            return fecha if fecha > datetime.now() else None
+        except ValueError:
+            return None
 
-    def obtener_mesa(self, numero: int) -> Mesa:
-        return self._mesas.get(numero)
+# ──────────────────────────────────────────────────────────────────────────────
+# 3. PERSISTENCIA (SRP - Implementación Concreta)
+# ──────────────────────────────────────────────────────────────────────────────
 
-class GestorDisponibilidad:
-    """Única responsabilidad: Controlar qué mesas están libres u ocupadas."""
-    def __init__(self):
-        self._ocupacion: Dict[datetime, Set[int]] = {}
+class PersistenciaJSON(GestorPersistencia):
+    """Implementación específica de guardado en archivos locales JSON."""
+    
+    def __init__(self, nombre_archivo: str = "reservas.json"):
+        self.archivo = nombre_archivo
 
-    def estan_disponibles(self, ids_mesas: List[int], fecha_hora: datetime) -> bool:
-        ocupadas = self._ocupacion.get(fecha_hora, set())
-        return not any(m_id in ocupadas for m_id in ids_mesas)
+    def cargar(self) -> Tuple[List[Dict], int]:
+        if not os.path.exists(self.archivo):
+            return [], 1
+        try:
+            with open(self.archivo, "r", encoding="utf-8") as f:
+                datos = json.load(f)
+            return datos.get("reservas", []), datos.get("id_contador", 1)
+        except (json.JSONDecodeError, KeyError):
+            return [], 1
 
-    def ocupar_mesas(self, ids_mesas: List[int], fecha_hora: datetime):
-        self._ocupacion.setdefault(fecha_hora, set()).update(ids_mesas)
+    def guardar(self, datos: List[Dict], contador: int) -> None:
+        with open(self.archivo, "w", encoding="utf-8") as f:
+            json.dump({"reservas": datos, "id_contador": contador}, 
+                      f, ensure_ascii=False, indent=2)
 
-    def liberar_mesas(self, ids_mesas: List[int], fecha_hora: datetime):
-        if fecha_hora in self._ocupacion:
-            for m_id in ids_mesas:
-                self._ocupacion[fecha_hora].discard(m_id)
-
-
-# --- 3. ORQUESTADOR (Fachada o Sistema Central) ---
+# ──────────────────────────────────────────────────────────────────────────────
+# 4. LÓGICA DE NEGOCIO (SRP / DIP)
+# ──────────────────────────────────────────────────────────────────────────────
 
 class SistemaReservas:
-    """Orquesta la interacción entre los servicios sin conocer los detalles de validación o storage."""
-    def __init__(self, inventario: InventarioMesas, validador: ValidadorContacto):
-        self.inventario = inventario
-        self.validador = validador
-        self.disponibilidad = GestorDisponibilidad()
-        self.reservas_activas: List[Reserva] = []
+    """
+    Coordina la lógica de negocio. No sabe CÓMO se guardan los datos (DIP),
+    solo que el objeto inyectado cumple la interfaz GestorPersistencia.
+    """
 
-    def crear_reserva(self, cliente: str, telefono: str, email: str,
-                      ids_mesas: List[int], fecha_hora: datetime) -> Reserva:
+    MAX_RESERVAS = 5
+    MESAS = [
+        {"numero": 1, "capacidad": 2, "zona": "interior"},
+        {"numero": 2, "capacidad": 4, "zona": "interior"},
+        {"numero": 3, "capacidad": 4, "zona": "terraza"},
+        {"numero": 4, "capacidad": 6, "zona": "terraza"},
+        {"numero": 5, "capacidad": 8, "zona": "privado"},
+    ]
+
+    def __init__(self, persistencia: GestorPersistencia):
+        self._persistencia = persistencia
+        self.reservas, self._id_contador = self._persistencia.cargar()
+
+    def _buscar_mesa(self, numero: int) -> Optional[Dict]:
+        return next((m for m in self.MESAS if m["numero"] == numero), None)
+
+    def esta_disponible(self, mesa: int, fecha: str) -> bool:
+        return not any(r["mesa"] == mesa and r["fecha_hora"] == fecha 
+                       and r["estado"] == "activa" for r in self.reservas)
+
+    def crear_reserva(self, nombre: str, telefono: str, email: str, 
+                      mesa_id: int, fecha: str, pax: int) -> Dict:
         
-        # Delegación de responsabilidades
-        self.validador.validar(cliente, telefono, email)
-        
-        for m_id in ids_mesas:
-            if not self.inventario.existe_mesa(m_id):
-                raise ValueError(f"La mesa {m_id} no existe en el inventario.")
+        # Saneamiento y validación vía clase especializada
+        nombre = ValidadorReserva.sanitizar(nombre, 80)
+        if not nombre or not ValidadorReserva.es_email_valido(email) \
+           or not ValidadorReserva.es_telefono_valido(telefono):
+            return {"error": "Datos de contacto inválidos o incompletos."}
 
-        if not self.disponibilidad.estan_disponibles(ids_mesas, fecha_hora):
-            raise ValueError("Conflicto: Mesas ocupadas en este horario.")
+        fecha_obj = ValidadorReserva.validar_fecha_futura(fecha)
+        if not fecha_obj:
+            return {"error": "Fecha inválida o pasada."}
 
-        # Ejecución
-        nueva_reserva = Reserva(cliente, telefono, email, ids_mesas, fecha_hora)
-        self.disponibilidad.ocupar_mesas(ids_mesas, fecha_hora)
-        self.reservas_activas.append(nueva_reserva)
-        
-        return nueva_reserva
+        # Reglas de negocio
+        mesa = self._buscar_mesa(mesa_id)
+        if not mesa or pax > mesa["capacidad"]:
+            return {"error": "Mesa no válida o capacidad excedida."}
 
-    def cancelar_reserva(self, reserva: Reserva):
-        if reserva not in self.reservas_activas:
-            raise ValueError("Reserva no encontrada.")
-            
-        self.disponibilidad.liberar_mesas(reserva.ids_mesas, reserva.fecha_hora)
-        self.reservas_activas.remove(reserva)
+        if not self.esta_disponible(mesa_id, fecha):
+            return {"error": "Mesa ocupada en ese horario."}
+
+        # Registro
+        nueva = {
+            "id": self._id_contador, "nombre": nombre, "mesa": mesa_id,
+            "fecha_hora": fecha, "comensales": pax, "estado": "activa"
+        }
+        self.reservas.append(nueva)
+        self._id_contador += 1
+        self._persistencia.guardar(self.reservas, self._id_contador)
+        return {"ok": True, "reserva": nueva}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 5. PUNTO DE ENTRADA
+# ──────────────────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    # Inyección de dependencias: Podemos cambiar JSON por una DB sin tocar la lógica
+    gestor_json = PersistenciaJSON("reservas.json")
+    app = SistemaReservas(persistencia=gestor_json)
+    
+    # Ejemplo de uso
+    resultado = app.crear_reserva("Juan Perez", "600123456", "juan@email.com", 1, "2025-12-01 20:00", 2)
+    print(resultado)
