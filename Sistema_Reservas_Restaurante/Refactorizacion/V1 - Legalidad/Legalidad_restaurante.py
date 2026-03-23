@@ -1,162 +1,352 @@
+"""
+SISTEMA DE RESERVAS - EDICIÓN LEGIBLE
+Módulo: Gestión de Seguridad y Persistencia
+"""
+
 import re
+import json
+import os
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict, Tuple, Optional, Any, Union
 
-class Mesa:
-    """Representa una mesa física en el establecimiento."""
-    def __init__(self, id_mesa: int, capacidad: int, zona: str):
-        self.id_mesa = id_mesa
-        self.capacidad = capacidad
-        self.zona = zona
+# ──────────────────────────────────────────────────────────────────────────────
+# CONFIGURACIÓN Y CONSTANTES
+# ──────────────────────────────────────────────────────────────────────────────
 
-    def __repr__(self):
-        return f"Mesa(ID={self.id_mesa}, Zona={self.zona})"
+MAX_RESERVAS_POR_CLIENTE: int = 5
+ARCHIVO_PERSISTENCIA: str = "reservas.json"
+FORMATO_FECHA_ESTANDAR: str = "%Y-%m-%d %H:%M"
 
-class Reserva:
-    """Entidad que almacena los datos de una reserva confirmada."""
-    def __init__(self, cliente: str, telefono: str, email: str,
-                 ids_mesas: List[int], fecha_hora: datetime):
-        self.cliente = cliente
-        self.telefono = telefono
-        self.email = email
-        self.ids_mesas = ids_mesas
-        self.fecha_hora = fecha_hora
+# ──────────────────────────────────────────────────────────────────────────────
+# UTILIDADES DE VALIDACIÓN Y SANEAMIENTO
+# ──────────────────────────────────────────────────────────────────────────────
 
-    def __repr__(self):
-        # Ofuscamos datos sensibles (PII) en representaciones de texto
-        cliente_protegido = f"{self.cliente[:3]}***"
-        return f"Reserva(Cliente={cliente_protegido}, Mesas={self.ids_mesas}, Fecha={self.fecha_hora})"
-
-class GestionRestaurante:
-    """Sistema central para la gestión de mesas y disponibilidad de reservas."""
+def es_email_valido(email_candidato: str) -> bool:
+    """
+    Verifica si una cadena cumple con el formato estándar de correo electrónico.
     
-    def __init__(self):
-        self.catalogo_mesas: Dict[int, Mesa] = {}
-        self.listado_reservas: List[Reserva] = []
-        self.calendario_ocupacion: Dict[datetime, set] = {}
+    Args:
+        email_candidato: El texto a validar.
+    Returns:
+        True si el formato es correcto, False en caso contrario.
+    """
+    patron_regex: str = r"^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$"
+    return bool(re.match(patron_regex, email_candidato.strip()))
 
-    def _validar_datos_contacto(self, nombre: str, telefono: str, email: str):
-        """Verifica que el formato de los datos de contacto sea correcto."""
-        if not (2 <= len(nombre) <= 50):
-            raise ValueError("El nombre debe tener entre 2 y 50 caracteres.")
-        
-        if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
-            raise ValueError("El formato del correo electrónico es inválido.")
-            
-        if not re.match(r"^\+?1?\d{9,15}$", telefono):
-            raise ValueError("El formato del teléfono es inválido (9-15 dígitos).")
 
-    def registrar_mesa(self, id_mesa: int, capacidad: int, zona: str):
-        """Añade una nueva mesa al inventario del restaurante."""
-        if not isinstance(id_mesa, int) or id_mesa <= 0:
-            raise ValueError("El ID de la mesa debe ser un número entero positivo.")
-            
-        if id_mesa in self.catalogo_mesas:
-            raise ValueError(f"La mesa con ID {id_mesa} ya está registrada.")
-            
-        self.catalogo_mesas[id_mesa] = Mesa(id_mesa, capacidad, zona)
+def es_telefono_valido(telefono_candidato: str) -> bool:
+    """
+    Valida que el teléfono contenga entre 9 y 15 dígitos, permitiendo prefijos y guiones.
+    """
+    patron_regex: str = r"^\+?[\d\s\-]{9,15}$"
+    return bool(re.match(patron_regex, telefono_candidato.strip()))
 
-    def realizar_reserva(self, cliente: str, telefono: str, email: str,
-                         ids_mesas: List[int], fecha_hora: datetime) -> Reserva:
-        """
-        Procesa y valida una nueva reserva. 
-        Asegura que las mesas existan y no estén ocupadas.
-        """
-        # 1. Validar integridad de la entrada
-        self._validar_datos_contacto(cliente, telefono, email)
-        
-        if not ids_mesas:
-            raise ValueError("Debe seleccionar al menos una mesa.")
 
-        # 2. Verificar existencia y disponibilidad de mesas
-        for id_m in ids_mesas:
-            if id_m not in self.catalogo_mesas:
-                raise ValueError(f"La mesa {id_m} no figura en nuestro inventario.")
-        
-        mesas_ocupadas = self.calendario_ocupacion.get(fecha_hora, set())
-        if any(id_m in mesas_ocupadas for id_m in ids_mesas):
-            raise ValueError("Conflicto de horario: Una o más mesas ya están reservadas.")
+def sanitizar_entrada_texto(texto_sucio: str, longitud_maxima: int = 100) -> str:
+    """
+    Limpia una cadena de caracteres eliminando símbolos potencialmente peligrosos 
+    para prevenir inyecciones y recorta la longitud.
+    """
+    caracteres_prohibidos: str = r"[<>\"'%;()&+\\\x00-\x1f]"
+    texto_limpio: str = re.sub(caracteres_prohibidos, "", texto_sucio)
+    return texto_limpio.strip()[:longitud_maxima]
 
-        # 3. Confirmar y persistir la reserva
-        nueva_reserva = Reserva(cliente, telefono, email, ids_mesas, fecha_hora)
-        self.listado_reservas.append(nueva_reserva)
-        
-        # Actualizar el mapa de ocupación
-        self.calendario_ocupacion.setdefault(fecha_hora, set()).update(ids_mesas)
-        
-        return nueva_reserva
 
-    def eliminar_reserva(self, reserva: Reserva):
-        """Cancela una reserva y libera las mesas asociadas."""
-        if reserva not in self.listado_reservas:
-            raise ValueError("No se encontró la reserva especificada.")
-
-        # Liberar las mesas del calendario de ocupación
-        if reserva.fecha_hora in self.calendario_ocupacion:
-            for id_m in reserva.ids_mesas:
-                self.calendario_ocupacion[reserva.fecha_hora].discard(id_m)
-        
-        self.listado_reservas.remove(reserva)
-
-    def editar_reserva(self, reserva_existente: Reserva, **nuevos_datos):
-        """
-        Modifica una reserva existente aplicando una limpieza temporal del estado
-        para permitir validaciones sin conflictos con los datos antiguos.
-        """
-        if reserva_existente not in self.listado_reservas:
-            raise ValueError("La reserva no existe en el sistema.")
-
-        # Extraer valores nuevos o mantener los actuales si no se especifican
-        datos_actualizados = {
-            "cliente": nuevos_datos.get("cliente", reserva_existente.cliente),
-            "telefono": nuevos_datos.get("telefono", reserva_existente.telefono),
-            "email": nuevos_datos.get("email", reserva_existente.email),
-            "ids_mesas": nuevos_datos.get("ids_mesas", reserva_existente.ids_mesas),
-            "fecha_hora": nuevos_datos.get("fecha_hora", reserva_existente.fecha_hora)
-        }
-
-        # Backup de seguridad para posible rollback
-        estado_anterior = {
-            "fecha": reserva_existente.fecha_hora,
-            "mesas": list(reserva_existente.ids_mesas)
-        }
-
-        # Eliminación temporal para re-validar disponibilidad limpiamente
-        self.eliminar_reserva(reserva_existente)
-
-        try:
-            # Intentar crear la reserva con la nueva configuración
-            self.realizar_reserva(
-                datos_actualizados["cliente"],
-                datos_actualizados["telefono"],
-                datos_actualizados["email"],
-                datos_actualizados["ids_mesas"],
-                datos_actualizados["fecha_hora"]
-            )
-        except Exception as error:
-            # ROLLBACK: Restaurar la reserva original en caso de fallo
-            self.realizar_reserva(
-                reserva_existente.cliente,
-                reserva_existente.telefono,
-                reserva_existente.email,
-                estado_anterior["mesas"],
-                estado_anterior["fecha"]
-            )
-            raise error
-
-# --- Bloque de Prueba ---
-if __name__ == "__main__":
-    app = GestionRestaurante()
-    app.registrar_mesa(id_mesa=1, capacidad=4, zona="Interior")
-    app.registrar_mesa(id_mesa=2, capacidad=2, zona="Terraza")
-
-    horario_cena = datetime(2026, 3, 20, 21, 0)
-
+def parsear_y_validar_fecha(cadena_fecha: str) -> Optional[datetime]:
+    """
+    Convierte una cadena a datetime y verifica que no sea una fecha pasada.
+    
+    Returns:
+        Objeto datetime si es válida y futura; None si es inválida o pasada.
+    """
     try:
-        reserva_carlos = app.realizar_reserva("Carlos", "600000000", "c@mail.com", [1], horario_cena)
-        print(f"Éxito: {reserva_carlos}")
+        fecha_objeto: datetime = datetime.strptime(cadena_fecha.strip(), FORMATO_FECHA_ESTANDAR)
+        if fecha_objeto <= datetime.now():
+            return None
+        return fecha_objeto
+    except ValueError:
+        return None
 
-        # Prueba de validación de duplicados
-        app.realizar_reserva("Marta", "611111111", "m@mail.com", [1], horario_cena)
-    except ValueError as e:
-        print(f"Validación detectada: {e}")
+# ──────────────────────────────────────────────────────────────────────────────
+# GESTIÓN DE PERSISTENCIA (JSON)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def cargar_estado_desde_disco() -> Tuple[List[Dict[str, Any]], int]:
+    """
+    Recupera el listado de reservas y el contador de IDs desde el archivo local.
+    """
+    if not os.path.exists(ARCHIVO_PERSISTENCIA):
+        return [], 1
+    
+    try:
+        with open(ARCHIVO_PERSISTENCIA, "r", encoding="utf-8") as archivo:
+            datos: Dict[str, Any] = json.load(archivo)
+        return datos.get("reservas", []), datos.get("id_contador", 1)
+    except (json.JSONDecodeError, KeyError):
+        print("⚠️ Error: El archivo de datos está corrupto. Se iniciará un estado vacío.")
+        return [], 1
+
+
+def guardar_estado_en_disco(listado_reservas: List[Dict[str, Any]], id_actual: int) -> None:
+    """
+    Sincroniza el estado actual del sistema con el archivo JSON.
+    """
+    payload: Dict[str, Any] = {
+        "reservas": listado_reservas,
+        "id_contador": id_actual
+    }
+    with open(ARCHIVO_PERSISTENCIA, "w", encoding="utf-8") as archivo:
+        json.dump(payload, archivo, ensure_ascii=False, indent=2)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# NÚCLEO DEL SISTEMA: CLASE DE GESTIÓN
+# ──────────────────────────────────────────────────────────────────────────────
+
+class SistemaReservas:
+    """
+    Controlador principal que encapsula la lógica de negocio y el estado de las mesas.
+    """
+
+    CONFIGURACION_MESAS: List[Dict[str, Any]] = [
+        {"numero": 1, "capacidad": 2, "zona": "interior"},
+        {"numero": 2, "capacidad": 4, "zona": "interior"},
+        {"numero": 3, "capacidad": 4, "zona": "terraza"},
+        {"numero": 4, "capacidad": 6, "zona": "terraza"},
+        {"numero": 5, "capacidad": 8, "zona": "privado"},
+    ]
+
+    def __init__(self) -> None:
+        self.reservas: List[Dict[str, Any]]
+        self._proximo_id: int
+        self.reservas, self._proximo_id = cargar_estado_desde_disco()
+
+    # ── Consultas Internas ─────────────────────────────────
+
+    def _obtener_datos_mesa(self, numero_mesa: int) -> Optional[Dict[str, Any]]:
+        """Busca la configuración técnica de una mesa por su número."""
+        return next((mesa for mesa in self.CONFIGURACION_MESAS if mesa["numero"] == numero_mesa), None)
+
+    def _obtener_reservas_activas_por_nombre(self, nombre_cliente: str) -> List[Dict[str, Any]]:
+        """Filtra todas las reservas con estado 'activa' para un cliente específico."""
+        nombre_normalizado: str = nombre_cliente.lower()
+        return [
+            reserva for reserva in self.reservas
+            if reserva["nombre"].lower() == nombre_normalizado and reserva["estado"] == "activa"
+        ]
+
+    # ── Lógica de Negocio ──────────────────────────────────
+
+    def verificar_disponibilidad(self, numero_mesa: int, fecha_hora_str: str) -> bool:
+        """Determina si una mesa está libre en un slot temporal específico."""
+        esta_ocupada: bool = any(
+            r["mesa"] == numero_mesa and 
+            r["fecha_hora"] == fecha_hora_str and 
+            r["estado"] == "activa"
+            for r in self.reservas
+        )
+        return not esta_ocupada
+
+    def crear_reserva(self, nombre: str, telefono: str, email: str,
+                      numero_mesa: int, fecha_str: str, total_comensales: int) -> Dict[str, Any]:
+        """
+        Procesa y valida la creación de una nueva reserva en el sistema.
+        """
+        # Saneamiento de datos
+        nombre_limpio: str = sanitizar_entrada_texto(nombre, max_len=80)
+        tel_limpio: str = sanitizar_entrada_texto(telefono, max_len=20)
+        email_limpio: str = sanitizar_entrada_texto(email, max_len=100)
+
+        # Validaciones de integridad
+        if not nombre_limpio:
+            return {"error": "El nombre no puede estar vacío."}
+        if not es_email_valido(email_limpio):
+            return {"error": f"Email inválido: '{email_limpio}'."}
+        if not es_telefono_valido(tel_limpio):
+            return {"error": f"Teléfono inválido: '{tel_limpio}'."}
+
+        # Validación temporal
+        fecha_objeto: Optional[datetime] = parsear_y_validar_fecha(fecha_str)
+        if fecha_objeto is None:
+            return {"error": f"Fecha inválida o pasada. Use: {FORMATO_FECHA_ESTANDAR}"}
+
+        # Validación de recursos (mesa y capacidad)
+        datos_mesa: Optional[Dict[str, Any]] = self._obtener_datos_mesa(numero_mesa)
+        if datos_mesa is None:
+            return {"error": f"La mesa {numero_mesa} no existe."}
+        
+        if not isinstance(total_comensales, int) or total_comensales < 1:
+            return {"error": "El número de comensales debe ser un entero positivo."}
+            
+        if total_comensales > datos_mesa["capacidad"]:
+            return {"error": f"Capacidad excedida. Máximo: {datos_mesa['capacidad']} personas."}
+
+        # Restricciones de negocio
+        activas: List[Dict[str, Any]] = self._obtener_reservas_activas_por_nombre(nombre_limpio)
+        if len(activas) >= MAX_RESERVAS_POR_CLIENTE:
+            return {"error": f"Límite alcanzado ({MAX_RESERVAS_POR_CLIENTE} reservas activas)."}
+
+        if not self.verificar_disponibilidad(numero_mesa, fecha_str):
+            return {"error": f"Mesa {numero_mesa} no disponible para esa fecha/hora."}
+
+        # Registro exitoso
+        nueva_reserva: Dict[str, Any] = {
+            "id": self._proximo_id,
+            "nombre": nombre_limpio,
+            "telefono": tel_limpio,
+            "email": email_limpio,
+            "mesa": numero_mesa,
+            "zona": datos_mesa["zona"],
+            "fecha_hora": fecha_str,
+            "comensales": total_comensales,
+            "estado": "activa",
+        }
+        
+        self.reservas.append(nueva_reserva)
+        self._proximo_id += 1
+        guardar_estado_en_disco(self.reservas, self._proximo_id)
+        
+        return {"ok": True, "reserva": nueva_reserva}
+
+    def cancelar_reserva(self, id_reserva: int) -> Dict[str, Any]:
+        """Cambia el estado de una reserva a 'cancelada'."""
+        for reserva in self.reservas:
+            if reserva["id"] == id_reserva:
+                if reserva["estado"] == "cancelada":
+                    return {"error": "Esta reserva ya se encuentra cancelada."}
+                
+                reserva["estado"] = "cancelada"
+                guardar_estado_en_disco(self.reservas, self._proximo_id)
+                return {"ok": True, "mensaje": f"Reserva {id_reserva} cancelada correctamente."}
+        
+        return {"error": f"ID {id_reserva} no encontrado."}
+
+    def consultar_por_cliente(self, nombre_cliente: str) -> List[Dict[str, Any]]:
+        """Retorna las reservas activas asociadas a un nombre de cliente."""
+        nombre_sanitizado: str = sanitizar_entrada_texto(nombre_cliente)
+        return self._obtener_reservas_activas_por_nombre(nombre_sanitizado)
+
+    def modificar_reserva(self, id_reserva: int, 
+                          nueva_fecha: Optional[str] = None, 
+                          nuevos_comensales: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Permite actualizar la fecha o el número de personas de una reserva existente.
+        """
+        for reserva in self.reservas:
+            if reserva["id"] == id_reserva and reserva["estado"] == "activa":
+                
+                if nueva_fecha:
+                    if not parsear_y_validar_fecha(nueva_fecha):
+                        return {"error": "La nueva fecha es inválida o pasada."}
+                    if not self.verificar_disponibilidad(reserva["mesa"], nueva_fecha):
+                        return {"error": "La mesa está ocupada en ese nuevo horario."}
+                    reserva["fecha_hora"] = nueva_fecha
+                
+                if nuevos_comensales:
+                    info_mesa: Dict[str, Any] = self._obtener_datos_mesa(reserva["mesa"])
+                    if nuevos_comensales > info_mesa["capacidad"]:
+                        return {"error": f"Capacidad máxima de mesa: {info_mesa['capacidad']}."}
+                    reserva["comensales"] = nuevos_comensales
+
+                guardar_estado_en_disco(self.reservas, self._proximo_id)
+                return {"ok": True, "reserva": reserva}
+                
+        return {"error": f"No se encontró una reserva activa con ID {id_reserva}."}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# INTERFAZ DE USUARIO (CLI)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def imprimir_ficha_reserva(r: Dict[str, Any]) -> None:
+    """Muestra los detalles de una reserva de forma estética en consola."""
+    print(f"  ID: {r['id']} | Cliente: {r['nombre']} | Mesa: {r['mesa']} ({r['zona'].upper()})")
+    print(f"  Agenda: {r['fecha_hora']} | Grupo: {r['comensales']} pax | Estado: {r['estado'].upper()}")
+    print(f"  Contacto: {r['telefono']} / {r['email']}\n")
+
+
+def ejecutar_menu_principal() -> None:
+    """Loop principal de interacción con el usuario."""
+    sistema: SistemaReservas = SistemaReservas()
+    print(f"🚀 Sistema iniciado. Registros actuales: {len(sistema.reservas)}")
+
+    while True:
+        print("\n" + "="*45)
+        print("      GESTIÓN DE RESERVAS - RESTAURANTE")
+        print("="*45)
+        print("1. Nueva Reserva")
+        print("2. Buscar por Cliente")
+        print("3. Cancelar Reserva")
+        print("4. Modificar Reserva")
+        print("5. Consultar Disponibilidad")
+        print("0. Salir")
+        
+        seleccion: str = input("\nSeleccione una opción: ").strip()
+
+        if seleccion == "1":
+            try:
+                nom: str = input("Nombre completo: ")
+                tel: str = input("Teléfono: ")
+                eml: str = input("Email: ")
+                num_m: int = int(input("Número de mesa (1-5): "))
+                fec: str = input(f"Fecha/Hora ({FORMATO_FECHA_ESTANDAR}): ")
+                pax: int = int(input("Número de comensales: "))
+                
+                resultado: Dict[str, Any] = sistema.crear_reserva(nom, tel, eml, num_m, fec, pax)
+                if "error" in resultado:
+                    print(f"❌ Error: {resultado['error']}")
+                else:
+                    print("✅ ¡Reserva confirmada!")
+                    imprimir_ficha_reserva(resultado["reserva"])
+            except ValueError:
+                print("❌ Error: Los campos numéricos deben ser enteros.")
+
+        elif seleccion == "2":
+            nom_busqueda: str = input("Nombre del cliente: ")
+            encontradas: List[Dict[str, Any]] = sistema.consultar_por_cliente(nom_busqueda)
+            if encontradas:
+                for res in encontradas:
+                    imprimir_ficha_reserva(res)
+            else:
+                print("No se encontraron reservas activas.")
+
+        elif seleccion == "3":
+            try:
+                id_cancelar: int = int(input("Ingrese el ID de la reserva: "))
+                res_canc: Dict[str, Any] = sistema.cancelar_reserva(id_cancelar)
+                print(f"✅ {res_canc['mensaje']}" if "ok" in res_canc else f"❌ {res_canc['error']}")
+            except ValueError:
+                print("❌ ID inválido.")
+
+        elif seleccion == "4":
+            try:
+                id_mod: int = int(input("ID de la reserva: "))
+                f_nueva: str = input("Nueva fecha (Enter para omitir): ").strip() or None
+                c_input: str = input("Nuevos comensales (Enter para omitir): ").strip()
+                c_nueva: Optional[int] = int(c_input) if c_input else None
+                
+                res_mod: Dict[str, Any] = sistema.modificar_reserva(id_mod, f_nueva, c_nueva)
+                if "error" in res_mod:
+                    print(f"❌ {res_mod['error']}")
+                else:
+                    print("✅ Cambios aplicados:")
+                    imprimir_ficha_reserva(res_mod["reserva"])
+            except ValueError:
+                print("❌ Entrada de datos no válida.")
+
+        elif seleccion == "5":
+            try:
+                m_check: int = int(input("Mesa a consultar: "))
+                f_check: str = input("Fecha y hora: ")
+                esta_libre: bool = sistema.verificar_disponibilidad(m_check, f_check)
+                print("✅ DISPONIBLE" if esta_libre else "❌ OCUPADA o inexistente")
+            except ValueError:
+                print("❌ Formato incorrecto.")
+
+        elif seleccion == "0":
+            print("Cerrando sistema... ¡Buen servicio!")
+            break
+        else:
+            print("Opción no reconocida.")
+
+
+if __name__ == "__main__":
+    ejecutar_menu_principal()
