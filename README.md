@@ -2,50 +2,59 @@
 Sistema backend en Python para la gestión integral de reservas en restaurantes. Incluye múltiples versiones refactorizadas con distintos enfoques de diseño (legalidad, estructura y rendimiento), junto con una suite completa de tests automatizados.
 
 ---
-
-# 📁 Estructura del Proyecto
-
-```
-Sistema_Reservas_Restaurante/
-│
-├── Alternativas/
+# 📁 Estructura General del Proyecto
+.
+├── Proyecto de Prueba/                   # Carpeta externa de borradores
 │   ├── __init__.py
-│   ├── Alternativa_1.py          # Implementación alternativa inicial
-│   └── Alternativa_2.py          # Segunda implementación alternativa
+│   ├── Readme.md
+│   └── restaurante.py
 │
-├── Refactorizacion/
-│   ├── VERSION 1 - Legalidad/
-│   │   ├── __init__.py
-│   │   └── Legalidad_restaurante.py      # Refactorización centrada en validaciones legales
-│   │
-│   ├── VERSION 2 - Estructura/
-│   │   ├── __init__.py
-│   │   └── Estructura_restaurante.py     # Refactorización centrada en arquitectura limpia
-│   │
-│   └── VERSION 3 - Rendimiento/
-│       ├── __init__.py
-│       └── Rendimiento_restaurante.py    # Refactorización optimizada para rendimiento
-│
-├── src/
-│   ├── __init__.py
-│   └── restaurante.py                    # Lógica principal del sistema
-│
-├── tests/
-│   ├── __init__.py
-│   ├── test_cancelar_reserva_restaurante_v2.py
-│   ├── test_crear_reserva_restaurante_v1.py
-│   ├── test_disponibilidad_fecha_pasada_rest.py
-│   ├── test_estadistica_sin_reserva_restaurante.py
-│   ├── test_refactorizacion__estadistica_sin_re.py
-│   ├── test_refactorizacion_cancelar_reserva_r.py
-│   ├── test_refactorizacion_crear_reserva_rest.py
-│   └── test_refactorizacion_disponibilidad_fec.py
-│
-├── pytest.ini                            # Configuración de pytest
-├── requirements.txt                      # Dependencias del proyecto
-├── .gitignore
-├── LICENSE
-└── README.md
+└── Restaurante/          # Directorio Principal del Proyecto
+    │
+    ├── Alternativas/
+    │   ├── __init__.py
+    │   ├── Alt1 - Programación Orientada a Objetos.py
+    │   └── Alt2 - Diccionario indexado por ID.py
+    │
+    ├── core/                             # Lógica de negocio central
+    │   ├── __init__.py
+    │   └── sistema.py
+    │
+    ├── data/                             # Capa de datos y persistencia
+    │   ├── __init__.py
+    │   └── persistence.py
+    │
+    ├── Refactorizacion/
+    │   ├── V1_Legalidad/
+    │   │   ├── __init__.py
+    │   │   └── Legalidad_restaurante.py
+    │   ├── V2_Estructura/
+    │   │   ├── __init__.py
+    │   │   └── Estructura_restaurante.py
+    │   └── V3_Rendimiento/
+    │       ├── __init__.py
+    │       └── Rendimiento_restaurante.py
+    │
+    │   
+    │   
+    │
+    ├── tests/                            # Pruebas unitarias y de integración
+    │   ├── __init__.py
+    │   ├── test_Rendimiento_restauranteV3.py
+    │   
+    │   
+    │
+    ├── utils/                            # Funciones de ayuda y validación
+    │   ├── __init__.py
+    │   ├── security.py
+    │   └── validators.py
+    │
+    ├── conftest.py                       # Configuración compartida de pytest
+    ├── pytest.ini                        # Archivo de configuración de pytest
+    ├── requirements.txt                  # Dependencias de Python
+    ├── .gitignore
+    ├── LICENSE
+    └── README.md                         # Documentación del proyecto
 ```
 
 ---
