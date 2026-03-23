@@ -3,6 +3,7 @@ Sistema backend en Python para la gestión integral de reservas en restaurantes.
 
 ---
 # 📁 Estructura General del Proyecto
+```
 .
 ├── Proyecto de Prueba/                   # Carpeta externa de borradores
 │   ├── __init__.py
