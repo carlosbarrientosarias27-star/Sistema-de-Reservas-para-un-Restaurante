@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timedelta
 
 
-from Refactorizacion.V3_Rendimiento.Rendimiento_restaurante import SistemaReservas
+from Restaurante.core.sistema import SistemaReservas
 
 
 # ─────────────────────────────────────────
@@ -43,7 +43,7 @@ def sistema_con_reserva(sistema):
         telefono="600111222",
         email="ana@mail.com",
         numero_mesa=2,
-        fecha_hora=fecha_futura(48),
+        fecha_str=fecha_futura(48),
         comensales=3,
     )
     return sistema

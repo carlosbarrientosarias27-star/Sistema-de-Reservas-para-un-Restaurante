@@ -1,7 +1,8 @@
-from utils.validators import validar_email, validar_telefono, validar_fecha
-from utils.security import sanitizar_texto
-from data.persistence import cargar_datos, guardar_datos
-from config import MAX_RESERVAS_POR_CLIENTE, FORMATO_FECHA 
+from Restaurante.utils.validators import validar_email, validar_telefono, validar_fecha
+from Restaurante.utils.security import sanitizar_texto
+from Restaurante.data.persistence import cargar_datos, guardar_datos
+from Restaurante.config import MAX_RESERVAS_POR_CLIENTE, FORMATO_FECHA
+from collections import Counter
 
 class SistemaReservas:
     """
@@ -18,8 +19,9 @@ class SistemaReservas:
         {"numero": 5, "capacidad": 8, "zona": "privado"},
     ]
 
-    def __init__(self):
-        self.reservas, self._id_contador = cargar_datos()
+    def __init__(self, ruta: str | None = None):
+        self._ruta = ruta
+        self.reservas, self._id_contador = cargar_datos(ruta)
 
     # ── Búsquedas internas ─────────────────────────────────
     def _buscar_mesa(self, numero: int) -> dict | None:
@@ -94,7 +96,7 @@ class SistemaReservas:
         }
         self.reservas.append(nueva)
         self._id_contador += 1
-        guardar_datos(self.reservas, self._id_contador)  # [6] Persistir
+        guardar_datos(self.reservas, self._id_contador, self._ruta)  # [6] Persistir
         return {"ok": True, "reserva": nueva}
 
     # ── Cancelar ───────────────────────────────────────────
@@ -128,9 +130,39 @@ class SistemaReservas:
                     r["fecha_hora"] = nueva_fecha
                 if nuevos_comensales:
                     mesa = self._buscar_mesa(r["mesa"])
-                    if nuevos_comensales > mesa["capacidad"]:
-                        return {"error": f"Capacidad máxima: {mesa['capacidad']}."}
+                    if mesa is None or nuevos_comensales > mesa["capacidad"]:
+                        return {"error": f"Capacidad máxima: {mesa['capacidad'] if mesa else 0}."}
                     r["comensales"] = nuevos_comensales
                 guardar_datos(self.reservas, self._id_contador)  # [6]
                 return {"ok": True, "reserva": r}
         return {"error": f"No se encontró la reserva activa {id_reserva}."}
+
+    def _mesa_libre(self, numero_mesa: int, fecha_str: str) -> bool:
+        return self.esta_disponible(numero_mesa, fecha_str)
+
+    def calcular_estadisticas(self) -> dict:
+        if not self.reservas:
+            return {"mensaje": "No hay reservas registradas."}
+        
+        estados = Counter(r["estado"] for r in self.reservas)
+        mesas_counter = Counter(r["mesa"] for r in self.reservas if r["estado"] == "activa")
+        clientes_counter = Counter(r["nombre"] for r in self.reservas if r["estado"] == "activa")
+
+        mesa_mas = str(mesas_counter.most_common(1)[0][0]) if mesas_counter else "N/A"
+        cliente_frec = clientes_counter.most_common(1)[0][0] if clientes_counter else "N/A"
+
+        return {
+            "total": len(self.reservas),
+            "activas": estados.get("activa", 0),
+            "canceladas": estados.get("cancelada", 0),
+            "mesa_mas_reservada": mesa_mas,
+            "cliente_frecuente": cliente_frec,
+        }
+
+    @property
+    def _idx_id(self) -> dict:
+        return {r["id"]: r for r in self.reservas}
+
+    @property
+    def _idx_mesa(self) -> dict:
+        return {(r["mesa"], r["fecha_hora"]): r for r in self.reservas if r["estado"] == "activa"}

@@ -1,6 +1,6 @@
 import re
 from datetime import datetime
-from config import FORMATO_FECHA 
+from Restaurante.config import FORMATO_FECHA 
 
 def validar_email(email: str) -> bool:
     """Comprueba que el email tiene formato básico válido."""
